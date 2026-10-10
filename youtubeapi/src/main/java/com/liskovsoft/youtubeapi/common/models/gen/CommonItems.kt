@@ -17,7 +17,8 @@ internal data class NavigationEndpointItem(
     val watchPlaylistEndpoint: WatchEndpointItem?,
     val openPopupAction: PopupActionItem?,
     val showEngagementPanelEndpoint: ShowEngagementPanelEndpoint?,
-    val searchEndpoint: SearchEndpoint?
+    val searchEndpoint: SearchEndpoint?,
+    val showSheetCommand: ShowSheetCommand? // collaborators of a video
 ) {
     data class SearchEndpoint(
         val query: String?

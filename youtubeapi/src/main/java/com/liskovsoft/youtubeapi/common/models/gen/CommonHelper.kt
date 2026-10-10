@@ -76,6 +76,9 @@ private fun NavigationEndpointItem.getOverlayHeader() = getOverlayPanel()?.heade
 private fun NavigationEndpointItem.getOverlayItems() = getOverlayContent()?.overlayPanelItemListRenderer?.items
 private fun NavigationEndpointItem.getEngagementContents() = getEngagementPanel()?.content?.sectionListRenderer?.contents
 private fun NavigationEndpointItem.getQuery() = searchEndpoint?.query
+// Collaboration video ('A and 2 more'): a sheet with the channels, the uploader first
+private fun NavigationEndpointItem.getCollaboratorId() =
+    showSheetCommand?.getItems()?.firstNotNullOfOrNull { it?.listItemViewModel?.rendererContext?.getBrowseId() }
 
 ////////
 
@@ -221,7 +224,7 @@ private fun TileItem.Header.getBadgeStyle() = tileHeaderRenderer?.thumbnailOverl
 private fun TileItem.Metadata.getStatusStyle() = tileMetadataRenderer?.lines?.firstNotNullOfOrNull { it?.lineRenderer?.items?.firstNotNullOfOrNull { it?.lineItemRenderer?.badge?.metadataBadgeRenderer?.style } }
 // Channel link in the byline (e.g. suggestions under the player)
 private fun TileItem.Metadata.getBrowseId() = tileMetadataRenderer?.lines?.firstNotNullOfOrNull { it?.lineRenderer?.items?.firstNotNullOfOrNull {
-    it?.lineItemRenderer?.text?.runs?.firstNotNullOfOrNull { it?.navigationEndpoint?.getBrowseId() } } }
+    it?.lineItemRenderer?.text?.runs?.firstNotNullOfOrNull { it?.navigationEndpoint?.getBrowseId() ?: it?.navigationEndpoint?.getCollaboratorId() } } }
 private fun TileItem.getMenu() = menu ?: getShowMenuCommand()?.menu
 private fun TileItem.getTileStyle() = style
 private fun TileItem.getBadgeStyle() = header?.getBadgeStyle()
