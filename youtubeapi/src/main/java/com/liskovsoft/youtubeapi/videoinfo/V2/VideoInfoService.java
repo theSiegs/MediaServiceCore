@@ -118,6 +118,7 @@ public class VideoInfoService extends VideoInfoServiceBase {
 
     static VideoInfo firstPlayable(AppClient beginType, InfoProvider provider) {
         VideoInfo loginRequired = null;
+        VideoInfo firstResponse = null;
 
         // Keep both existing fallback passes: adaptive formats first, then regular formats.
         for (int pass = 0; pass < 2; pass++) {
@@ -125,6 +126,9 @@ public class VideoInfoService extends VideoInfoServiceBase {
             do {
                 VideoInfo result = provider.get(nextType);
                 if (result != null) {
+                    if (firstResponse == null) {
+                        firstResponse = result;
+                    }
                     if (result.isLoginRequired()) {
                         loginRequired = result;
                     }
@@ -140,7 +144,10 @@ public class VideoInfoService extends VideoInfoServiceBase {
         if (loginRequired != null) {
             throw new LoginRequiredException(loginRequired.getPlayabilityStatus());
         }
-        return null;
+
+        // No client can play it (e.g. members only content or removed video).
+        // Return the unplayable response so the caller can show the real reason instead of reloading endlessly.
+        return firstResponse;
     }
 
     public boolean switchNextFormat(boolean force) {

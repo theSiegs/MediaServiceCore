@@ -469,6 +469,11 @@ public class VideoInfo {
             return false;
         }
 
+        // The stream is still playable through the manifest even when every format is SABR only.
+        if (getDashManifestUrl() != null || getHlsManifestUrl() != null) {
+            return false;
+        }
+
         // TODO: live SABR formats still broken
         return mAdaptiveFormats.get(0).isBroken() && (isLive() || isLiveContent());
     }
