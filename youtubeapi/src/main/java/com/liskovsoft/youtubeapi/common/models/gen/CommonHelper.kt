@@ -77,6 +77,7 @@ private fun NavigationEndpointItem.getOverlayItems() = getOverlayContent()?.over
 private fun NavigationEndpointItem.getEngagementContents() = getEngagementPanel()?.content?.sectionListRenderer?.contents
 private fun NavigationEndpointItem.getQuery() = searchEndpoint?.query
 // Collaboration video ('A and 2 more'): a sheet with the channels, the uploader first
+// HearthTube only: needs Android 5+; upstream supports Android 4 (see StackOverflowError note in CommonItems.kt)
 private fun NavigationEndpointItem.getCollaboratorId() =
     showSheetCommand?.getItems()?.firstNotNullOfOrNull { it?.listItemViewModel?.rendererContext?.getBrowseId() }
 
