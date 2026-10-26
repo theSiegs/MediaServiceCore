@@ -475,7 +475,10 @@ public class VideoInfo {
         }
 
         // TODO: live SABR formats still broken
-        return mAdaptiveFormats.get(0).isBroken() && (isLive() || isLiveContent());
+        //return mAdaptiveFormats.get(0).isBroken() && isLive();
+
+        // TODO: live SABR formats are experimental
+        return false;
     }
 
     public String getPoToken() {

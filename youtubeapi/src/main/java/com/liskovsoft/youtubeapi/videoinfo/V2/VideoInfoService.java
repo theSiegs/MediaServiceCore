@@ -31,7 +31,7 @@ public class VideoInfoService extends VideoInfoServiceBase {
     private static VideoInfoService sInstance;
     private final VideoInfoApi mVideoInfoApi;
     // TODO: TV clients are broken because of recently introduced '-tcl' player variant (different nParam and nSignature)
-    private final static AppClient[] VIDEO_INFO_TYPE_LIST = {
+    private final static AppClient[] CLIENT_LIST = {
             AppClient.TV, // Supports auth. Fixes "please sign in" bug! (the best for Premium users)
             AppClient.VISIONOS, // no url formats
             AppClient.TV_DOWNGRADED, // works with old UAs like old Cobalt and old Xbox (non-tcl players)
@@ -49,9 +49,9 @@ public class VideoInfoService extends VideoInfoServiceBase {
             //AppClient.ANDROID_SDK_LESS, // doesn't require pot (hangs on Cronet!)
     };
     @Nullable
-    private AppClient mActualInfoType = null;
+    private AppClient mActualClient = null;
     @Nullable
-    private AppClient mNextInfoType = null;
+    private AppClient mNextClient = null;
     private boolean mUseAuth;
     private List<TranslationLanguage> mCachedTranslationLanguages;
     private int mTranslationLanguagesAttempts;
@@ -108,7 +108,7 @@ public class VideoInfoService extends VideoInfoServiceBase {
     }
 
     private VideoInfo firstPlayable(String videoId, String clickTrackingParams) {
-        final AppClient beginType = mNextInfoType != null ? mNextInfoType : VIDEO_INFO_TYPE_LIST[0];
+        final AppClient beginType = getClient();
         return firstPlayable(beginType, client -> getVideoInfoWithRentFix(client, videoId, clickTrackingParams));
     }
 
@@ -136,7 +136,7 @@ public class VideoInfoService extends VideoInfoServiceBase {
                         return result;
                     }
                 }
-                nextType = Helpers.getNextValue(VIDEO_INFO_TYPE_LIST, nextType);
+                nextType = Helpers.getNextValue(CLIENT_LIST, nextType);
             } while (nextType != beginType);
         }
 
@@ -150,28 +150,32 @@ public class VideoInfoService extends VideoInfoServiceBase {
         return firstResponse;
     }
 
-    public boolean switchNextFormat(boolean force) {
+    public boolean switchNextClient(boolean force) {
         // Try to reset pot cache for the last video
-        if (!force && !mIsUnplayable && mActualInfoType != null && PoTokenGate.resetCache(mActualInfoType)) {
+        if (!force && !mIsUnplayable && mActualClient != null && PoTokenGate.resetCache(mActualClient)) {
             return false;
         }
 
         // And last, try to switch the client
-        nextVideoInfoType();
-        return mNextInfoType == VIDEO_INFO_TYPE_LIST[0];
+        switchNextClientInt();
+        return mNextClient == CLIENT_LIST[0];
     }
 
     public void switchNextSubtitle() {
         CaptionTrack.sFormat = Helpers.getNextValue(CaptionTrack.CaptionFormat.values(), CaptionTrack.sFormat);
     }
 
-    public void resetInfoType() {
-        resetInfoTypeToDefault();
+    public void resetClient() {
+        resetClientInt();
         PoTokenGate.resetCache();
     }
 
-    private void nextVideoInfoType() {
-        mNextInfoType = Helpers.getNextValue(VIDEO_INFO_TYPE_LIST, mActualInfoType);
+    public AppClient getClient() {
+        return mNextClient != null ? mNextClient : CLIENT_LIST[0];
+    }
+
+    private void switchNextClientInt() {
+        mNextClient = Helpers.getNextValue(CLIENT_LIST, mActualClient);
     }
 
     private VideoInfo getVideoInfoWithRentFix(AppClient client, String videoId, String clickTrackingParams) {
@@ -300,27 +304,27 @@ public class VideoInfoService extends VideoInfoServiceBase {
         mUseAuth = oldUseAuth;
     }
 
-    private void resetInfoTypeToDefault() {
-        mNextInfoType = null;
-        mActualInfoType = VIDEO_INFO_TYPE_LIST[0];
-        persistVideoInfoType();
+    private void resetClientInt() {
+        mNextClient = null;
+        mActualClient = CLIENT_LIST[0];
+        persistClient();
     }
 
-    private void persistVideoInfoType() {
+    private void persistClient() {
         if (!GlobalPreferences.isInitialized()) {
             return;
         }
 
-        getData().setVideoInfoType(mActualInfoType != null ? mActualInfoType.ordinal() : -1);
+        getData().setClientType(mActualClient != null ? mActualClient.ordinal() : -1);
     }
 
     private void persistRecentTypeIfNeeded(VideoInfo videoInfo) {
-        if (videoInfo == null || videoInfo.isUnplayable() || videoInfo.getClient() == mActualInfoType) {
+        if (videoInfo == null || videoInfo.isUnplayable() || videoInfo.getClient() == mActualClient) {
             return;
         }
 
-        mActualInfoType = videoInfo.getClient();
-        persistVideoInfoType();
+        mActualClient = videoInfo.getClient();
+        persistClient();
     }
 
     private static boolean shouldObtainExtendedFormats(VideoInfo result) {

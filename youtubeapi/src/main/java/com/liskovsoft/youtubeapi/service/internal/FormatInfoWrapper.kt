@@ -28,7 +28,10 @@ internal object FormatInfoWrapper {
     private val lock = Any()
 
     @JvmStatic
-    fun getFormatInfo(videoId: String, clickTrackingParams: String?): MediaItemFormatInfo? {
+    fun getFormatInfo(videoId: String?, clickTrackingParams: String?): MediaItemFormatInfo? {
+        if (videoId == null)
+            return null
+
         try {
             synchronized(lock) {
                 return selectPlaybackFormatInfo(videoId, clickTrackingParams)
@@ -39,22 +42,22 @@ internal object FormatInfoWrapper {
     }
 
     @JvmStatic
-    fun switchNextFormat(force: Boolean) {
+    fun switchNextClient(force: Boolean) {
         if (mTryInnertubeFirst && !mInnertubeResult.isUnplayable) {
             if (!force && mInnertubeResult.client?.let { PoTokenGate.resetCache(it) } ?: false)
                 return
 
             mTryInnertubeFirst = false
         } else {
-            val endReached: Boolean = getVideoInfoService().switchNextFormat(force)
+            val endReached: Boolean = getVideoInfoService().switchNextClient(force)
             if (endReached)
                 mTryInnertubeFirst = true
         }
     }
 
     @JvmStatic
-    fun resetFormat() {
-        getVideoInfoService().resetInfoType()
+    fun resetClient() {
+        getVideoInfoService().resetClient()
     }
 
     @JvmStatic
@@ -159,10 +162,10 @@ internal object FormatInfoWrapper {
 
         val appClient = formatInfo?.clientInfo as? AppClient
 
-        val videoInfoType = appClient?.ordinal ?: -1
+        val ordinal = appClient?.ordinal ?: -1
 
-        if (getData().videoInfoType != videoInfoType)
-            getData().videoInfoType = videoInfoType
+        if (getData().clientType != ordinal)
+            getData().clientType = ordinal
     }
 
     private fun checkSigned() {
