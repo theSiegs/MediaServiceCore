@@ -64,6 +64,11 @@ public final class LoungeSender {
         }
     }
 
+    /** Uses the app's shared HTTP client */
+    public LoungeSender(String senderId, String senderName) {
+        this(com.liskovsoft.sharedutils.okhttp.OkHttpManager.instance().getClient(), senderId, senderName);
+    }
+
     /**
      * @param senderId a stable id for this phone (the screen lists remotes by it)
      * @param senderName what the screen shows for this phone
