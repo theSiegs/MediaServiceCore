@@ -8,6 +8,7 @@ import com.liskovsoft.googlecommon.common.converters.jsonpath.JsonPath;
 import com.liskovsoft.googlecommon.common.helpers.ServiceHelper;
 import com.liskovsoft.googlecommon.common.models.V2.TextItem;
 import com.liskovsoft.youtubeapi.common.helpers.AppClient;
+import com.liskovsoft.youtubeapi.service.internal.MediaServiceData;
 import com.liskovsoft.youtubeapi.videoinfo.models.formats.AdaptiveVideoFormat;
 import com.liskovsoft.youtubeapi.videoinfo.models.formats.RegularVideoFormat;
 
@@ -465,7 +466,8 @@ public class VideoInfo {
      * TODO: remove when SABR parser will be fixed
      */
     private boolean isAdaptiveFormatsBroken() {
-        if (mAdaptiveFormats == null || mAdaptiveFormats.isEmpty()) {
+        // NOTE: live SABR formats are experimental
+        if (mAdaptiveFormats == null || mAdaptiveFormats.isEmpty() || MediaServiceData.instance().isSabrLiveEnabled()) {
             return false;
         }
 
@@ -474,11 +476,8 @@ public class VideoInfo {
             return false;
         }
 
-        // TODO: live SABR formats still broken
+        // Reportedly, live SABR formats do not work on some accounts
         return mAdaptiveFormats.get(0).isBroken() && isLive();
-
-        // TODO: live SABR formats are experimental
-        //return false;
     }
 
     public String getPoToken() {
