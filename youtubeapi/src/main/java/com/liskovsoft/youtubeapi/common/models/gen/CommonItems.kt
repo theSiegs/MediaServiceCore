@@ -130,7 +130,8 @@ internal data class ButtonContentWrapper(
     val toggleButtonRenderer: ToggleButtonRenderer?,
     val buttonRenderer: ButtonRenderer?,
     val musicPlayButtonRenderer: MusicPlayButtonRenderer?,
-    val likeButtonRenderer: LikeButtonRenderer?
+    val likeButtonRenderer: LikeButtonRenderer?,
+    val subscribeButtonRenderer: SubscribeButtonRenderer?
 )
 
 internal data class ButtonRenderer(
@@ -627,7 +628,8 @@ internal data class ThumbnailOverlayItem(
 ) {
     data class ThumbnailOverlayTimeStatusRenderer(
         val text: TextItem?,
-        val style: String?
+        val style: String?,
+        val icon: IconItem?
     )
 
     data class ThumbnailOverlayResumePlaybackRenderer(
