@@ -28,6 +28,7 @@ public class VideoInfoService extends VideoInfoServiceBase {
     private final VideoInfoApi mVideoInfoApi;
     private boolean mUseAuth;
     private List<TranslationLanguage> mCachedTranslationLanguages;
+    private int mTranslationLanguagesAttempts;
     private boolean mIsRestrictedVideosAllowed = true;
 
     private VideoInfoService() {
@@ -184,7 +185,11 @@ public class VideoInfoService extends VideoInfoServiceBase {
         if (needMoreSubtitles(result)) {
             Log.d(TAG, "Enable full list of auto generated subtitles...");
 
-            if (mCachedTranslationLanguages == null || mCachedTranslationLanguages.size() < 100) {
+            // The translation languages list is global (same for every video), so fetch it once per session.
+            // Previously a full extra WEB video info request ran before EVERY video whenever the list had < 100
+            // entries, adding seconds to playback start on low-end devices.
+            if (mCachedTranslationLanguages == null && mTranslationLanguagesAttempts < 2) {
+                mTranslationLanguagesAttempts++;
                 mUseAuth = false;
                 VideoInfo webInfo = null;
                 try {
@@ -192,7 +197,7 @@ public class VideoInfoService extends VideoInfoServiceBase {
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
-                if (webInfo != null) {
+                if (webInfo != null && webInfo.getTranslationLanguages() != null && !webInfo.getTranslationLanguages().isEmpty()) {
                     mCachedTranslationLanguages = webInfo.getTranslationLanguages();
                 }
             }
