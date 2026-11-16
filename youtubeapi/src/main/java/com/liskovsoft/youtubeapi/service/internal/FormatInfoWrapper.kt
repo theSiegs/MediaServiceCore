@@ -1,6 +1,7 @@
 package com.liskovsoft.youtubeapi.service.internal
 
 import com.liskovsoft.mediaserviceinterfaces.data.MediaItemFormatInfo
+import com.liskovsoft.sharedutils.helpers.Helpers
 import com.liskovsoft.sharedutils.prefs.GlobalPreferences
 import com.liskovsoft.youtubeapi.app.AppService
 import com.liskovsoft.youtubeapi.app.PoTokenGate
@@ -12,6 +13,7 @@ import com.liskovsoft.youtubeapi.service.data.YouTubeMediaItemFormatInfo
 import com.liskovsoft.youtubeapi.videoinfo.V2.VideoInfoService
 
 internal object FormatInfoWrapper {
+    private enum class ProviderType { INNERTUBE, LEGACY }
     /**
      * The cached format info is only meant for quick reloads of the same video (error retries,
      * quality switches, next/prev). After a long pause (e.g. TV standby overnight) its stream URLs and
@@ -21,19 +23,32 @@ internal object FormatInfoWrapper {
     private const val MAX_CACHE_AGE_MS = 30 * 60 * 1_000L
     private var mCachedFormatInfo: MediaItemFormatInfo? = null
     private var mCachedAtMs: Long = 0
-    private var mTryInnertubeFirst: Boolean = false
-    private val mInnertubeResult = object { var isUnplayable: Boolean = false; var client: AppClient? = null }
-    private val mInnertubeProvider: (String, String?) -> MediaItemFormatInfo? =
-        { videoId, clickTrackingParams ->
-            getFormatInfoInnertube(videoId, clickTrackingParams).also {
-                mInnertubeResult.isUnplayable = it?.isUnplayable ?: true
-                mInnertubeResult.client = it?.clientInfo as? AppClient
-                persistFormatInfoType(it)
-            }
-        }
-    private val mLegacyProvider: (String, String?) -> MediaItemFormatInfo? =
-        { videoId, clickTrackingParams -> getFormatInfoLegacy(videoId, clickTrackingParams) }
+    private val mInnertubeProvider: (AppClient, String, String?) -> MediaItemFormatInfo? =
+        { client, videoId, clickTrackingParams -> getFormatInfoInnertube(client, videoId, clickTrackingParams) }
+    private val mLegacyProvider: (AppClient, String, String?) -> MediaItemFormatInfo? =
+        { client, videoId, clickTrackingParams -> getFormatInfoLegacy(client, videoId, clickTrackingParams) }
     private val lock = Any()
+    private val CLIENT_LIST = arrayOf(
+        Pair(AppClient.TV, ProviderType.LEGACY), // Supports auth. Fixes "please sign in" bug! (the best for Premium users)
+        Pair(AppClient.TV_SAMSUNG, ProviderType.LEGACY), // Supports auth. Still contains DASH formats
+        Pair(AppClient.WEB, ProviderType.INNERTUBE), // Fix video clip blocked in current location
+        Pair(AppClient.VISIONOS, ProviderType.LEGACY), // no url formats
+        Pair(AppClient.TV_DOWNGRADED, ProviderType.LEGACY), // works with old UAs like old Cobalt and old Xbox (non-tcl players)
+        Pair(AppClient.WEB_EMBED, ProviderType.LEGACY), // Restricted (18+) videos (not working)
+        //AppClient.ANDROID_REEL, // doesn't require pot and cipher (hangs on all engines)
+        Pair(AppClient.WEB_SAFARI, ProviderType.LEGACY),
+        Pair(AppClient.IOS, ProviderType.LEGACY),
+        Pair(AppClient.GEO, ProviderType.LEGACY), // Fix video clip blocked in current location
+        Pair(AppClient.MWEB, ProviderType.LEGACY), // single audio language
+        //AppClient.TV_LEGACY,
+        //AppClient.TV_EMBED, // single audio language
+        Pair(AppClient.ANDROID_VR, ProviderType.LEGACY), // doesn't require pot and cipher (often hangs?)
+        //AppClient.TV_SIMPLY, // hangs?
+        //AppClient.ANDROID_SDK_LESS, // doesn't require pot (hangs on Cronet!)
+    )
+    private var mActualClient: Pair<AppClient, ProviderType>? = null
+    private var mNextClient: Pair<AppClient, ProviderType>? = null
+    private var mIsUnplayable: Boolean = false
 
     @JvmStatic
     fun getFormatInfo(videoId: String?, clickTrackingParams: String?): MediaItemFormatInfo? {
@@ -42,7 +57,23 @@ internal object FormatInfoWrapper {
 
         try {
             synchronized(lock) {
-                return selectPlaybackFormatInfo(videoId, clickTrackingParams)
+                //videoId = "K04WmBtVsOs"; // the testing video: Memories of Memories
+
+                val cachedFormatInfo = getCachedFormatInfo(videoId)
+
+                if (cachedFormatInfo != null) {
+                    return cachedFormatInfo
+                }
+
+                checkSigned()
+
+                val formatInfo = firstPlayable(videoId, clickTrackingParams)
+
+                mIsUnplayable = formatInfo?.isUnplayable ?: true
+
+                setCachedFormatInfo(formatInfo, clickTrackingParams)
+
+                return formatInfo
             }
         } finally {
             ReloadPlaybackGate.reset(videoId)
@@ -51,26 +82,34 @@ internal object FormatInfoWrapper {
 
     @JvmStatic
     fun switchNextClient(force: Boolean) {
-        if (mTryInnertubeFirst && !mInnertubeResult.isUnplayable) {
-            if (!force && mInnertubeResult.client?.let { PoTokenGate.resetCache(it) } ?: false)
-                return
-
-            mTryInnertubeFirst = false
-        } else {
-            val endReached: Boolean = getVideoInfoService().switchNextClient(force)
-            if (endReached)
-                mTryInnertubeFirst = true
+        // Try to reset pot cache for the last video
+        if (!force && !mIsUnplayable && (mActualClient?.let { PoTokenGate.resetCache(it.first) } ?: false)) {
+            return
         }
+
+        // And last, try to switch the client
+        switchNextClientInt()
     }
 
     @JvmStatic
     fun resetClient() {
-        getVideoInfoService().resetClient()
+        resetClientInt()
+        PoTokenGate.resetCache()
     }
 
     @JvmStatic
     fun invalidateCache() {
         mCachedFormatInfo = null
+    }
+
+    @JvmStatic
+    fun switchNextSubtitle() {
+        getVideoInfoService().switchNextSubtitle()
+    }
+
+    @JvmStatic
+    fun allowRestrictedVideos(allow: Boolean) {
+        getVideoInfoService().allowRestrictedVideos(allow)
     }
 
     @JvmStatic
@@ -93,68 +132,53 @@ internal object FormatInfoWrapper {
         return !formatInfo.isAuth() && !formatInfo.isUnplayable() && getSignInService().isSigned
     }
 
-    private fun selectPlaybackFormatInfo(videoId: String, clickTrackingParams: String?): MediaItemFormatInfo? {
-        var formatInfo = getPrimaryProvider()(videoId, clickTrackingParams)
-
-        if (formatInfo != null && formatInfo.isUnplayable()) {
-            formatInfo = getSecondaryProvider()(videoId, clickTrackingParams)
-        }
-
-        return formatInfo
+    private fun firstPlayable(videoId: String, clickTrackingParams: String?): MediaItemFormatInfo? {
+        return firstInfoWith(videoId, clickTrackingParams) { !it.isUnplayable() }
+            ?: firstInfoWith(videoId, clickTrackingParams) { it.urlFormats != null } // fallback to regular formats (480p)
+            ?: firstInfoWith(videoId, clickTrackingParams) { true } // fallback to error result
     }
 
-    private fun getPrimaryProvider(): (String, String?) -> MediaItemFormatInfo? {
-        return if (mTryInnertubeFirst) mInnertubeProvider else mLegacyProvider
+    private fun firstInfoWith(videoId: String, clickTrackingParams: String?, infoTester: (MediaItemFormatInfo) -> Boolean): MediaItemFormatInfo? {
+        val beginClient = getClient()
+        var nextClient = beginClient
+
+        do {
+            // NOTE: History fix. CPN should be unique per each /player fetch
+            AppService.instance().resetClientPlaybackNonce()
+
+            val result = getProvider(nextClient)(nextClient.first, videoId, clickTrackingParams)
+
+            if (result != null && infoTester(result)) {
+                persistRecentTypeIfNeeded(nextClient, result)
+                return result
+            }
+
+            nextClient = Helpers.getNextValue(CLIENT_LIST, nextClient)
+        } while (nextClient != beginClient)
+
+        return null
     }
 
-    private fun getSecondaryProvider(): (String, String?) -> MediaItemFormatInfo? {
-        return if (mTryInnertubeFirst) mLegacyProvider else mInnertubeProvider
+    private fun getProvider(client: Pair<AppClient, ProviderType>): (AppClient, String, String?) -> MediaItemFormatInfo? {
+        return if (client.second == ProviderType.INNERTUBE)
+            mInnertubeProvider
+        else
+            mLegacyProvider
     }
 
-    private fun getFormatInfoInnertube(videoId: String, clickTrackingParams: String?): MediaItemFormatInfo? {
-        //videoId = "K04WmBtVsOs"; // the testing video: Memories of Memories
-
-        val cachedFormatInfo: MediaItemFormatInfo? = getCachedFormatInfo(videoId)
-
-        if (cachedFormatInfo != null) {
-            return cachedFormatInfo
-        }
-
-        checkSigned()
-
-        AppService.instance().resetClientPlaybackNonce() // history fix: unique value per each video info
-
-        val formatInfo = InnertubeService.createFormatInfo(videoId)
-
-        setCachedFormatInfo(formatInfo, clickTrackingParams)
-
-        return formatInfo
+    private fun getFormatInfoInnertube(client: AppClient, videoId: String, clickTrackingParams: String?): MediaItemFormatInfo? {
+        return InnertubeService.createFormatInfo(client, videoId)
     }
 
-    private fun getFormatInfoLegacy(videoId: String?, clickTrackingParams: String?): MediaItemFormatInfo? {
-        val cachedFormatInfo = getCachedFormatInfo(videoId)
+    private fun getFormatInfoLegacy(client: AppClient, videoId: String, clickTrackingParams: String?): MediaItemFormatInfo? {
+        val videoInfo = getVideoInfoService().getVideoInfo(client, videoId, clickTrackingParams)
 
-        if (cachedFormatInfo != null) {
-            return cachedFormatInfo
-        }
-
-        checkSigned()
-
-        val videoInfo = getVideoInfoService().getVideoInfo(videoId, clickTrackingParams)
-
-        val formatInfo = YouTubeMediaItemFormatInfo.from(videoInfo)
-
-        setCachedFormatInfo(formatInfo, clickTrackingParams)
-
-        return formatInfo
+        return YouTubeMediaItemFormatInfo.from(videoInfo)
     }
 
     private fun getCachedFormatInfo(videoId: String?): MediaItemFormatInfo? {
-        if (System.currentTimeMillis() - mCachedAtMs > MAX_CACHE_AGE_MS) {
-            return null
-        }
-
-        return mCachedFormatInfo?.takeIf { videoId != null && it.getVideoId() == videoId && it.isCacheActual() }
+        return mCachedFormatInfo?.takeIf { videoId != null && it.getVideoId() == videoId && it.isCacheActual() &&
+            System.currentTimeMillis() - mCachedAtMs < MAX_CACHE_AGE_MS }
     }
 
     private fun setCachedFormatInfo(formatInfo: MediaItemFormatInfo?, clickTrackingParams: String?) {
@@ -166,19 +190,6 @@ internal object FormatInfoWrapper {
         mCachedFormatInfo = formatInfo
         mCachedAtMs = System.currentTimeMillis()
         formatInfo.setClickTrackingParams(clickTrackingParams)
-    }
-
-    private fun persistFormatInfoType(formatInfo: MediaItemFormatInfo?) {
-        if (!GlobalPreferences.isInitialized()) {
-            return
-        }
-
-        val appClient = formatInfo?.clientInfo as? AppClient
-
-        val ordinal = appClient?.ordinal ?: -1
-
-        if (getData().clientType != ordinal)
-            getData().clientType = ordinal
     }
 
     private fun checkSigned() {
@@ -195,5 +206,46 @@ internal object FormatInfoWrapper {
 
     private fun getData(): MediaServiceData {
         return MediaServiceData.instance()
+    }
+
+    private fun getClient(): Pair<AppClient, ProviderType> {
+        return mNextClient ?: CLIENT_LIST[0]
+    }
+
+    @JvmStatic
+    fun getActualClient(): AppClient {
+        return (mNextClient ?: CLIENT_LIST[0]).first
+    }
+
+    private fun switchNextClientInt() {
+        mNextClient = Helpers.getNextValue(CLIENT_LIST, mActualClient)
+    }
+
+    private fun resetClientInt() {
+        mNextClient = null
+        mActualClient = CLIENT_LIST[0]
+        persistClient()
+    }
+
+    private fun persistClient() {
+        if (!GlobalPreferences.isInitialized()) {
+            return;
+        }
+
+        val appClient = mActualClient?.first
+
+        val ordinal = appClient?.ordinal ?: -1
+
+        if (getData().clientType != ordinal)
+            getData().clientType = ordinal
+    }
+
+    private fun persistRecentTypeIfNeeded(client: Pair<AppClient, ProviderType>, videoInfo: MediaItemFormatInfo?) {
+        if (videoInfo == null || videoInfo.isUnplayable() || client == mActualClient) {
+            return
+        }
+
+        mActualClient = client
+        persistClient()
     }
 }
